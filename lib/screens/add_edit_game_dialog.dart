@@ -74,6 +74,7 @@ class _AddEditGameDialogState extends State<AddEditGameDialog> {
         isFavorite: _isFavorite,
         achievements: widget.gameToEdit?.achievements ?? [],
         personalNotes: widget.gameToEdit?.personalNotes,
+        extraData: widget.gameToEdit?.extraData ?? const {},
       );
       Navigator.pop(context, game);
     }

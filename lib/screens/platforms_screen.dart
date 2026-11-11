@@ -3,13 +3,14 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models.dart';
 import '../main.dart';
 import '../services/epic_api_service.dart';
+import 'riot_login_dialog.dart';
 import 'steam_login_dialog.dart';
 
 class PlatformsScreen extends StatefulWidget {
   final List<PlatformAccount> accounts;
   final Function(List<PlatformAccount> updatedAccounts) onAccountsUpdated;
   final Function(List<Game> importedGames, PlatformAccount steamAccount) onSteamLibraryImported;
-  final VoidCallback onSteamLoggedOut;
+  final void Function(GamePlatform platform) onPlatformLoggedOut;
   final Future<String?> Function() onSyncAllRequested;
 
   const PlatformsScreen({
@@ -17,7 +18,7 @@ class PlatformsScreen extends StatefulWidget {
     required this.accounts,
     required this.onAccountsUpdated,
     required this.onSteamLibraryImported,
-    required this.onSteamLoggedOut,
+    required this.onPlatformLoggedOut,
     required this.onSyncAllRequested,
   });
 
@@ -49,6 +50,8 @@ class _PlatformsScreenState extends State<PlatformsScreen> {
       // Connect Flow
       if (account.platform == GamePlatform.steam) {
         _openSteamLoginDialog(account);
+      } else if (account.platform == GamePlatform.riot) {
+        _openRiotLoginDialog(account);
       } else if (account.platform == GamePlatform.epic) {
         _openEpicLoginDialog(account);
       } else {
@@ -58,6 +61,39 @@ class _PlatformsScreenState extends State<PlatformsScreen> {
       // Logout / Disconnect Flow
       _confirmLogout(account);
     }
+  }
+
+  void _openRiotLoginDialog(PlatformAccount account) async {
+    final result = await showRiotLoginDialog(context, account: account);
+    if (result == null || !mounted) return;
+
+    final fetchedGames = result['games'] as List<Game>;
+    final riotId = result['riotId'] as String;
+    final avatarUrl = (result['avatarUrl'] as String?) ?? '';
+    final puuid = (result['puuid'] as String?) ?? '';
+    final region = (result['region'] as String?) ?? 'na1';
+    final apiKey = (result['apiKey'] as String?) ?? '';
+    final accentColor = AccentColorScope.of(context);
+
+    setState(() {
+      account.isConnected = true;
+      account.username = riotId;
+      account.avatarUrl = avatarUrl;
+      account.accountId = puuid;
+      account.region = region;
+      account.apiKey = apiKey;
+      account.lastSynced = DateTime.now();
+      account.totalGamesCount = fetchedGames.length;
+    });
+
+    widget.onSteamLibraryImported(fetchedGames, account);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Connected to Riot Games ($riotId)! Imported ${fetchedGames.length} games.'),
+        backgroundColor: accentColor,
+      ),
+    );
   }
 
   void _openSteamLoginDialog(PlatformAccount account) async {
@@ -329,11 +365,13 @@ class _PlatformsScreenState extends State<PlatformsScreen> {
         account.avatarUrl = '';
         account.accountId = '';
         account.apiKey = '';
+        account.region = '';
         account.totalGamesCount = 0;
       });
 
-      if (account.platform == GamePlatform.steam) {
-        widget.onSteamLoggedOut();
+      if (account.platform == GamePlatform.steam ||
+          account.platform == GamePlatform.riot) {
+        widget.onPlatformLoggedOut(account.platform);
       } else {
         widget.onAccountsUpdated(_accounts);
       }

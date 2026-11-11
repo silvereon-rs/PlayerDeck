@@ -3,12 +3,12 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models.dart';
+import 'proxy_http_client.dart';
 
 class SteamApiService {
   static const String steamApiKeyUrl = 'https://steamcommunity.com/dev/apikey';
   static const String defaultAvatarUrl =
       'https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg';
-  static const String _localProxyBase = 'http://127.0.0.1:9999/proxy?url=';
   static const int _steamId64Base = 76561197960265728;
 
   @visibleForTesting
@@ -20,21 +20,13 @@ class SteamApiService {
   @visibleForTesting
   static bool? forceWebForTesting;
 
-  static bool? _localProxyAvailable;
-  static DateTime? _localProxyCheckedAt;
-  static Future<bool>? _inFlightLocalProxyCheck;
-
   static final Map<int, String> knownCommunityIcons = {};
 
   @visibleForTesting
   static void resetProxyCacheForTesting() {
-    _localProxyAvailable = null;
-    _localProxyCheckedAt = null;
-    _inFlightLocalProxyCheck = null;
+    ProxyHttpClient.resetProxyCache();
     knownCommunityIcons.clear();
   }
-
-  static bool get _isWebEnvironment => forceWebForTesting ?? kIsWeb;
 
   static String _requireApiKey(String? apiKey) {
     final trimmed = apiKey?.trim() ?? '';
@@ -51,140 +43,17 @@ class SteamApiService {
     return RegExp(r'^7656\d{13}$').hasMatch(identifier);
   }
 
-  static Future<http.Response> _performGet(
-    Uri uri, {
-    Map<String, String>? headers,
-    Duration timeout = const Duration(seconds: 12),
-  }) {
-    return httpGetImpl(uri, headers: headers).timeout(timeout);
-  }
-
-  static bool _shouldTryLocalProxy() {
-    final host = Uri.base.host.toLowerCase();
-    final isLocalHost =
-        host == 'localhost' || host == '127.0.0.1' || host.isEmpty;
-    if (!isLocalHost) return false;
-
-    if (_localProxyAvailable == false && _localProxyCheckedAt != null) {
-      if (DateTime.now().difference(_localProxyCheckedAt!) <
-          const Duration(seconds: 60)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  static bool _isCorsfixProxyError(http.Response res) {
-    if (res.statusCode >= 400 && res.body.contains('"corsfix_error"')) {
-      return true;
-    }
-    return false;
-  }
-
   /// Performs HTTP GET request directly on native platforms and via CORS proxies on Web.
-  static Future<http.Response> _httpGet(String targetUrl) async {
-    if (!_isWebEnvironment) {
-      return await _performGet(
-        Uri.parse(targetUrl),
-        headers: const {
-          'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) PlayerDeck/1.0',
-        },
-        timeout: const Duration(seconds: 12),
-      );
-    }
-
-    String? lastFailure;
-
-    // 1. Try local development CORS proxy (tool/cors_proxy.dart) if running on localhost
-    if (_shouldTryLocalProxy()) {
-      final inFlight = _inFlightLocalProxyCheck;
-      bool shouldAttempt = true;
-      if (inFlight != null) {
-        shouldAttempt = await inFlight;
-      }
-
-      if (shouldAttempt) {
-        final completer = _localProxyAvailable == null ? Completer<bool>() : null;
-        if (completer != null) {
-          _inFlightLocalProxyCheck = completer.future;
-        }
-        try {
-          final localUrl = '$_localProxyBase${Uri.encodeComponent(targetUrl)}';
-          final probeTimeout = _localProxyAvailable == true
-              ? const Duration(seconds: 10)
-              : const Duration(milliseconds: 1500);
-          final res = await _performGet(
-            Uri.parse(localUrl),
-            timeout: probeTimeout,
-          );
-          final isProxyFailure =
-              res.statusCode == 502 && res.body.startsWith('Proxy error:');
-          if (!isProxyFailure) {
-            _localProxyAvailable = true;
-            _localProxyCheckedAt = DateTime.now();
-            completer?.complete(true);
-            if (completer != null) _inFlightLocalProxyCheck = null;
-            return res;
-          }
-          lastFailure = 'Local proxy upstream error (${res.statusCode})';
-          completer?.complete(true);
-          if (completer != null) _inFlightLocalProxyCheck = null;
-        } catch (e) {
-          _localProxyAvailable = false;
-          _localProxyCheckedAt = DateTime.now();
-          completer?.complete(false);
-          if (completer != null) _inFlightLocalProxyCheck = null;
-        }
-      }
-    }
-
-    // 2. Try public CORS proxies (never pass User-Agent header in browser fetch)
-    final proxyCandidates = <({String url, Duration timeout, bool isCorsfix})>[
-      (
-        url: 'https://proxy.corsfix.com/?$targetUrl',
-        timeout: const Duration(seconds: 10),
-        isCorsfix: true,
-      ),
-      (
-        url: 'https://api.allorigins.win/raw?url=${Uri.encodeComponent(targetUrl)}',
-        timeout: const Duration(seconds: 6),
-        isCorsfix: false,
-      ),
-      (
-        url: 'https://api.codetabs.com/v1/proxy?quest=${Uri.encodeComponent(targetUrl)}',
-        timeout: const Duration(seconds: 6),
-        isCorsfix: false,
-      ),
-    ];
-
-    for (final candidate in proxyCandidates) {
-      try {
-        final res = await _performGet(
-          Uri.parse(candidate.url),
-          timeout: candidate.timeout,
-        );
-        if (candidate.isCorsfix && _isCorsfixProxyError(res)) {
-          lastFailure = 'Corsfix proxy error (${res.statusCode})';
-          continue;
-        }
-        // Treat upstream Steam 200/400/401/403/404 responses as valid proxy completions
-        if (res.statusCode == 200 ||
-            res.statusCode == 400 ||
-            res.statusCode == 401 ||
-            res.statusCode == 403 ||
-            res.statusCode == 404) {
-          return res;
-        }
-        lastFailure = 'Proxy HTTP ${res.statusCode}';
-      } catch (e) {
-        lastFailure = e.toString();
-      }
-    }
-
-    throw Exception(
-      'Unable to reach Steam from the browser ($lastFailure). '
-      'For local web development, start the CORS proxy with "dart run tool/cors_proxy.dart" and try again.',
+  static Future<http.Response> _httpGet(String targetUrl) {
+    return ProxyHttpClient.get(
+      targetUrl,
+      nativeHeaders: const {
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) PlayerDeck/1.0',
+      },
+      httpGetImpl: httpGetImpl,
+      forceWeb: forceWebForTesting,
+      serviceName: 'Steam',
     );
   }
 

@@ -9,6 +9,7 @@ import 'screens/settings_screen.dart';
 import 'screens/game_detail_screen.dart';
 import 'screens/add_edit_game_dialog.dart';
 import 'services/steam_api_service.dart';
+import 'services/riot_api_service.dart';
 
 class AppShell extends StatefulWidget {
   final void Function(Color) onAccentChanged;
@@ -58,6 +59,7 @@ class _AppShellState extends State<AppShell> {
     final now = DateTime.now();
     final allPlatforms = [
       GamePlatform.steam,
+      GamePlatform.riot,
       GamePlatform.gog,
       GamePlatform.epic,
       GamePlatform.psn,
@@ -159,7 +161,8 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<String?> _syncAllPlatforms() async {
-    String? message;
+    final syncedParts = <String>[];
+
     final steamIdx = _accounts.indexWhere(
       (a) => a.platform == GamePlatform.steam && a.isConnected,
     );
@@ -180,8 +183,34 @@ class _AppShellState extends State<AppShell> {
         steamAcc.lastSynced = DateTime.now();
         steamAcc.totalGamesCount = fetchedGames.length;
         _onPlatformLibraryImported(fetchedGames, steamAcc);
-        message =
-            'Synced Steam (${steamAcc.username}): ${fetchedGames.length} games';
+        syncedParts.add(
+          'Steam (${steamAcc.username}): ${fetchedGames.length} games',
+        );
+      }
+    }
+
+    final riotIdx = _accounts.indexWhere(
+      (a) => a.platform == GamePlatform.riot && a.isConnected,
+    );
+    if (riotIdx >= 0) {
+      final riotAcc = _accounts[riotIdx];
+      if (riotAcc.username.isNotEmpty && riotAcc.apiKey.isNotEmpty) {
+        final result = await RiotApiService.importRiotLibrary(
+          riotAcc.username,
+          apiKey: riotAcc.apiKey,
+          regionCode: riotAcc.region.isNotEmpty ? riotAcc.region : 'na1',
+        );
+        final fetchedGames = result['games'] as List<Game>;
+        riotAcc.username = result['riotId'] as String;
+        riotAcc.avatarUrl = (result['avatarUrl'] as String?) ?? '';
+        riotAcc.accountId = (result['puuid'] as String?) ?? riotAcc.accountId;
+        riotAcc.region = (result['region'] as String?) ?? riotAcc.region;
+        riotAcc.lastSynced = DateTime.now();
+        riotAcc.totalGamesCount = fetchedGames.length;
+        _onPlatformLibraryImported(fetchedGames, riotAcc);
+        syncedParts.add(
+          'Riot Games (${riotAcc.username}): ${fetchedGames.length} games',
+        );
       }
     }
 
@@ -194,7 +223,8 @@ class _AppShellState extends State<AppShell> {
       }
     });
     await _saveLibraryData();
-    return message;
+    if (syncedParts.isEmpty) return null;
+    return 'Synced ${syncedParts.join(' • ')}';
   }
 
   void _resetToDefaultData() async {
@@ -207,20 +237,19 @@ class _AppShellState extends State<AppShell> {
     await _saveLibraryData();
   }
 
-  void _onSteamLoggedOut() {
+  void _onPlatformLoggedOut(GamePlatform platform) {
     setState(() {
-      final accIdx = _accounts.indexWhere(
-        (a) => a.platform == GamePlatform.steam,
-      );
+      final accIdx = _accounts.indexWhere((a) => a.platform == platform);
       if (accIdx >= 0) {
         _accounts[accIdx].isConnected = false;
         _accounts[accIdx].username = '';
         _accounts[accIdx].avatarUrl = '';
         _accounts[accIdx].accountId = '';
         _accounts[accIdx].apiKey = '';
+        _accounts[accIdx].region = '';
         _accounts[accIdx].totalGamesCount = 0;
       }
-      _games.removeWhere((g) => g.platform == GamePlatform.steam);
+      _games.removeWhere((g) => g.platform == platform);
     });
     _saveLibraryData();
   }
@@ -244,6 +273,10 @@ class _AppShellState extends State<AppShell> {
         _games.removeWhere(
           (g) =>
               g.platform == GamePlatform.steam && g.id.startsWith('steam_'),
+        );
+      } else if (account.platform == GamePlatform.riot) {
+        _games.removeWhere(
+          (g) => g.platform == GamePlatform.riot && g.id.startsWith('riot_'),
         );
       }
 
@@ -275,9 +308,12 @@ class _AppShellState extends State<AppShell> {
                 lastPlayed: imported.lastPlayed.isAfter(existing.lastPlayed)
                     ? imported.lastPlayed
                     : existing.lastPlayed,
-                summary: existing.summary.isNotEmpty
-                    ? existing.summary
-                    : imported.summary,
+                summary: imported.platform == GamePlatform.riot &&
+                        imported.summary.isNotEmpty
+                    ? imported.summary
+                    : (existing.summary.isNotEmpty
+                        ? existing.summary
+                        : imported.summary),
                 genre: existing.genre != 'PC Gaming'
                     ? existing.genre
                     : imported.genre,
@@ -286,6 +322,9 @@ class _AppShellState extends State<AppShell> {
                     ? existing.achievements
                     : imported.achievements,
                 personalNotes: existing.personalNotes,
+                extraData: imported.extraData.isNotEmpty
+                    ? imported.extraData
+                    : existing.extraData,
               );
 
         final existingIdx = _games.indexWhere((g) => g.id == merged.id);
@@ -347,7 +386,7 @@ class _AppShellState extends State<AppShell> {
           _saveLibraryData();
         },
         onSteamLibraryImported: _onPlatformLibraryImported,
-        onSteamLoggedOut: _onSteamLoggedOut,
+        onPlatformLoggedOut: _onPlatformLoggedOut,
         onSyncAllRequested: _syncAllPlatforms,
         onResetDataRequested: _resetToDefaultData,
       ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 enum GamePlatform {
   steam,
+  riot,
   gog,
   epic,
   psn,
@@ -13,6 +14,8 @@ enum GamePlatform {
     switch (this) {
       case GamePlatform.steam:
         return 'Steam';
+      case GamePlatform.riot:
+        return 'Riot Games';
       case GamePlatform.gog:
         return 'GOG Galaxy';
       case GamePlatform.epic:
@@ -32,6 +35,8 @@ enum GamePlatform {
     switch (this) {
       case GamePlatform.steam:
         return const Color(0xFF171A21);
+      case GamePlatform.riot:
+        return const Color(0xFFD13639);
       case GamePlatform.gog:
         return const Color(0xFF5A177C);
       case GamePlatform.epic:
@@ -51,6 +56,8 @@ enum GamePlatform {
     switch (this) {
       case GamePlatform.steam:
         return const Color(0xFF7F9D9D);
+      case GamePlatform.riot:
+        return const Color(0xFFFF4655);
       case GamePlatform.gog:
         return const Color(0xFFD644FF);
       case GamePlatform.epic:
@@ -70,6 +77,8 @@ enum GamePlatform {
     switch (this) {
       case GamePlatform.steam:
         return Icons.sports_esports;
+      case GamePlatform.riot:
+        return Icons.local_fire_department_rounded;
       case GamePlatform.gog:
         return Icons.auto_awesome;
       case GamePlatform.epic:
@@ -198,6 +207,7 @@ class Game {
   bool isFavorite;
   List<Achievement> achievements;
   String? personalNotes;
+  Map<String, dynamic> extraData;
 
   Game({
     required this.id,
@@ -218,6 +228,7 @@ class Game {
     this.isFavorite = false,
     this.achievements = const [],
     this.personalNotes,
+    this.extraData = const {},
   });
 
   int get unlockedAchievementsCount => achievements.where((a) => a.isUnlocked).length;
@@ -244,6 +255,7 @@ class Game {
         'isFavorite': isFavorite,
         'achievements': achievements.map((a) => a.toJson()).toList(),
         'personalNotes': personalNotes,
+        if (extraData.isNotEmpty) 'extraData': extraData,
       };
 
   factory Game.fromJson(Map<String, dynamic> json) => Game(
@@ -276,6 +288,9 @@ class Game {
                 .toList() ??
             [],
         personalNotes: json['personalNotes'],
+        extraData: json['extraData'] is Map
+            ? Map<String, dynamic>.from(json['extraData'] as Map)
+            : const {},
       );
 }
 
@@ -288,6 +303,7 @@ class PlatformAccount {
   int totalGamesCount;
   String accountId;
   String apiKey;
+  String region;
 
   PlatformAccount({
     required this.platform,
@@ -298,6 +314,7 @@ class PlatformAccount {
     required this.totalGamesCount,
     this.accountId = '',
     this.apiKey = '',
+    this.region = '',
   });
 
   Map<String, dynamic> toJson() => {
@@ -309,6 +326,7 @@ class PlatformAccount {
         'totalGamesCount': totalGamesCount,
         'accountId': accountId,
         'apiKey': apiKey,
+        'region': region,
       };
 
   factory PlatformAccount.fromJson(Map<String, dynamic> json) => PlatformAccount(
@@ -325,6 +343,7 @@ class PlatformAccount {
         totalGamesCount: json['totalGamesCount'] ?? 0,
         accountId: json['accountId'] ?? '',
         apiKey: json['apiKey'] ?? '',
+        region: json['region'] ?? '',
       );
 }
 
@@ -560,6 +579,7 @@ List<PlatformAccount> getInitialDefaultAccounts() {
   final now = DateTime.now();
   return [
     PlatformAccount(platform: GamePlatform.steam, username: 'cyber_voyager_99', avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=200&auto=format&fit=crop', isConnected: true, lastSynced: now.subtract(const Duration(minutes: 15)), totalGamesCount: 142),
+    PlatformAccount(platform: GamePlatform.riot, username: 'Silver#NA1', avatarUrl: '', isConnected: true, lastSynced: now.subtract(const Duration(minutes: 30)), totalGamesCount: 3, region: 'na1'),
     PlatformAccount(platform: GamePlatform.gog, username: 'witcher_fanatic', avatarUrl: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?q=80&w=200&auto=format&fit=crop', isConnected: true, lastSynced: now.subtract(const Duration(hours: 1)), totalGamesCount: 38),
     PlatformAccount(platform: GamePlatform.epic, username: 'epic_gamer_xl', avatarUrl: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?q=80&w=200&auto=format&fit=crop', isConnected: true, lastSynced: now.subtract(const Duration(hours: 4)), totalGamesCount: 65),
     PlatformAccount(platform: GamePlatform.psn, username: 'shadow_kratos_ps5', avatarUrl: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?q=80&w=200&auto=format&fit=crop', isConnected: true, lastSynced: now.subtract(const Duration(days: 1)), totalGamesCount: 89),
@@ -572,6 +592,7 @@ List<PlatformAccount> getDisconnectedDefaultAccounts() {
   final now = DateTime.now();
   return [
     PlatformAccount(platform: GamePlatform.steam, username: '', avatarUrl: '', isConnected: false, lastSynced: now, totalGamesCount: 0),
+    PlatformAccount(platform: GamePlatform.riot, username: '', avatarUrl: '', isConnected: false, lastSynced: now, totalGamesCount: 0),
     PlatformAccount(platform: GamePlatform.gog, username: '', avatarUrl: '', isConnected: false, lastSynced: now, totalGamesCount: 0),
     PlatformAccount(platform: GamePlatform.epic, username: '', avatarUrl: '', isConnected: false, lastSynced: now, totalGamesCount: 0),
     PlatformAccount(platform: GamePlatform.psn, username: '', avatarUrl: '', isConnected: false, lastSynced: now, totalGamesCount: 0),
